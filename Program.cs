@@ -10,61 +10,100 @@ using System.Threading.Tasks;
 using logsplit.Extensions;
 using PerrysNetConsole;
 using Newtonsoft.Json;
-
-/**
- * Analyse Stats:
- * 410M rows
- * ~ 58 Minutes Processing
- * = ~116k rows per second
- */
-
-// ^(?<ClientIP>[^\s]+)\s+-\s+(?<ClientUser>[^\s]+)\s+\[(?<Timestamp>[^\]]+)\]\s+"(?:(?:(?<RequestMethod>[A-Z]+)\s+(?<RequestUri>[^\s]+)\s+(?<Protocol>[^"]+)|(?<InvalidRequest>.+)))?"\s+(?<StatusCode>[0-9]+)\s+(?<BytesSent>[0-9]+)\s+"(?<Referer>[^"]*)"\s+"(?<UserAgent>[^"]*)"\s+"[^"]+"\s+"[^"]+"$
+using CommandLine;
 
 namespace logsplit
 {
     public class Program
     {
-        // Log Splitter
-
-        private static readonly string logPath = @"/run/user/1000/gvfs/sftp:host=ellen,user=christian/home/christian/Download/logs";
-        private static readonly string outputLogPath = @"/run/user/1000/gvfs/sftp:host=ellen,user=christian/home/christian/Download/processed-logs";
         private static List<StreamInfo<StreamWriter>> OutputStreams = new List<StreamInfo<StreamWriter>>();
 
-
-        public static void Main(string[] args)
+        public static int Main(string[] args)
         {
             CoEx.ColorTitlePrimary = new ColorScheme(ConsoleColor.Gray, ConsoleColor.Black);
             CoEx.ColorTitleSecondary = new ColorScheme(ConsoleColor.DarkBlue, ConsoleColor.Black);
 
-            // Split new logfiles into month-collections
-            MainSplitAccessLogs();
+            return MainParseArguments(args);
+        }
 
-            // Analyze Logfile
-            MainAnalyzeAccessLog();
+        private static int MainParseArguments(params string[] args)
+        {
+            return CommandLine.Parser.Default.ParseArguments<InitOptions, ImportOptions, AnalyzeOptions, StatisticOptions>(args)
+                .MapResult(
+                    (InitOptions opts) => MainInit(opts),
+                    (ImportOptions opts) => MainImport(opts),
+                    (AnalyzeOptions opts) => MainAnalyze(opts),
+                    (StatisticOptions opts) => MainStatistic(opts),
+                    errs => 1
+                );
+        }
 
-            // Create stats
-            var logRgx = new Regex(@"-dingetun-.+\.log\.gz\.json$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static int MainInit(InitOptions opts)
+        {
+            if (string.IsNullOrWhiteSpace(opts.Path) || !opts.Path.Exists())
+            {
+                CoEx.WriteLine("The path does not exists.");
+                return 1;
+            }
 
-            var logFiles = Directory
-                .EnumerateFiles(outputLogPath, "*.*", SearchOption.AllDirectories)
-                .Where(file => logRgx.IsMatch(file))
-                .OrderBy(file => file);
+            if (!opts.Path.IsDirectory())
+            {
+                CoEx.WriteLine("The path is not a directory.");
+                return 1;
+            }
 
-            MainResults(logFiles.ToArray());
+            if (!opts.Path.IsEmptyDirectory("input", "repository"))
+            {
+                CoEx.WriteLine("The directory is not empty.");
+                return 1;
+            }
+
+            var inputFolder = Path.Combine(opts.Path, "input");
+            var repositoryFolder = Path.Combine(opts.Path, "repository");
+
+            if (!Directory.Exists(inputFolder))
+            {
+                Directory.CreateDirectory(inputFolder);
+            }
+
+            if (!Directory.Exists(repositoryFolder))
+            {
+                Directory.CreateDirectory(repositoryFolder);
+            }
+
+            if (!string.IsNullOrWhiteSpace(opts.HostFolder))
+            {
+                var hostFolder = Path.Combine(inputFolder, opts.HostFolder);
+                var hostCfg = Path.Combine(hostFolder, "loginfo.json");
+
+                if (!Directory.Exists(hostFolder))
+                {
+                    Directory.CreateDirectory(hostFolder);
+                }
+
+                if (!File.Exists(hostCfg))
+                {
+                    File.WriteAllText(hostCfg, JsonConvert.SerializeObject(new LogInfo(), Formatting.Indented));
+                }
+            }
+
+            return 0;
         }
 
         /// <summary>
         /// Split new log files processed by logrotate into
         /// our monthly collections
         /// </summary>
-        private static void MainSplitAccessLogs()
+        private static int MainImport(ImportOptions opts)
         {
             CoEx.Clear();
             CoEx.WriteTitleLarge("Split Log Files into monthly collections");
 
+            var inputPath = Path.Combine(opts.Path, "input");
+
             // Find valid log files
             var logFiles = Directory
-                .EnumerateFiles(logPath, "*.*", SearchOption.AllDirectories)
+                .EnumerateFiles(inputPath, "*.*", SearchOption.AllDirectories)
                 .Where(file => file.EndsWith(".gz", true, CultureInfo.InvariantCulture))
                 .OrderBy(file => file)
                 .ToArray();
@@ -140,22 +179,26 @@ namespace logsplit
             });
 
             OutputStreams.Clear();
+
+            return 0;
         }
 
         /// <summary>
         /// Analyze monthly collections
         /// </summary>
         /// <param name="files"></param>
-        private static void MainAnalyzeAccessLog()
+        private static int MainAnalyze(AnalyzeOptions opts)
         {
             CoEx.Clear();
             CoEx.WriteTitleLarge("Analyze Log Files");
 
+            var repoPath = Path.Combine(opts.Path, "repository");
+
             // find unprocessed log collections
             var logFiles = Directory
-                .EnumerateFiles(outputLogPath, "*.*", SearchOption.AllDirectories)
+                .EnumerateFiles(repoPath, "*.*", SearchOption.AllDirectories)
                 .Where(file => file.EndsWith(".log.gz", true, CultureInfo.InvariantCulture))
-                .Where(file => !File.Exists($"{file}.json"))
+                .Where(file => opts.Force || !File.Exists($"{file}.json"))
                 .OrderBy(file => file)
                 .ToArray();
 
@@ -216,10 +259,26 @@ namespace logsplit
 
             CoEx.WriteLine();
             Console.WriteLine($"Took {(DateTime.Now - startTime).TotalSeconds:0.000} seconds");
+
+            return 0;
         }
 
-        private static void MainResults(params string[] files)
+        private static int MainStatistic(StatisticOptions opts)
         {
+            CoEx.Clear();
+            CoEx.WriteTitleLarge("Analyze Log Files");
+
+            var repoPath = Path.Combine(opts.Path, "repository");
+            var rgx = new Regex(opts.FilePattern, RegexOptions.Compiled);
+
+            // find unprocessed log collections
+            var files = Directory
+                .EnumerateFiles(repoPath, "*.*", SearchOption.AllDirectories)
+                .Where(file => file.EndsWith(".log.gz.json", true, CultureInfo.InvariantCulture))
+                .Where(file => rgx.IsMatch(Path.GetFileName(file)))
+                .OrderBy(file => file)
+                .ToArray();
+
             var graph = new SimpleGraph();
             var load = new LoadIndicator() { Message = "Calculate..." };
             Dictionary<DateTime, Timeslot> counter = new Dictionary<DateTime, Timeslot>();
@@ -272,6 +331,7 @@ namespace logsplit
             load.Stop();
             graph.Draw(hitGraphData);
 
+            return 0;
         }
 
         /// <summary>

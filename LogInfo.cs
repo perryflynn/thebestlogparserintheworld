@@ -12,10 +12,10 @@ namespace logsplit
         private Regex rgx = new Regex(@"^(?<ClientIP>[^\s]+)\s+-\s+(?<ClientUser>[^\s]+)\s+\[(?<Timestamp>[^\]]+)\]\s+""(?:(?:(?<RequestMethod>[A-Z]+)\s+(?<RequestUri>[^\s]+)\s+(?<Protocol>[^""]+)|(?<InvalidRequest>.+)))?""\s+(?<StatusCode>[0-9]+)\s+(?<BytesSent>[0-9]+)\s+""(?<Referer>[^""]*)""\s+""(?<UserAgent>[^""]*)""$", RegexOptions.Compiled);
 
         [JsonIgnore]
-        private string filergxstr = @"";
+        private string filergxstr = @"/(?<HostName>[^/]+)/(?<GroupName>[^/-]+)[^/]+\.gz$";
 
         [JsonIgnore]
-        private Regex filergx = new Regex(@"");
+        private Regex filergx = new Regex(@"/(?<HostName>[^/]+)/(?<GroupName>[^/-]+)[^/]+\.gz$");
 
         public string LineRegexStr
         {
