@@ -22,6 +22,9 @@ namespace logsplit
         [JsonIgnore]
         public Dictionary<string, long> Referer { get; set; } = new Dictionary<string, long>();
 
+        [JsonIgnore]
+        public Dictionary<string, long> Requests { get; set; } = new Dictionary<string, long>();
+
         public long VisitorsCount { get; set; }
 
         public double VisitorHitAvg { get; set; }
@@ -34,12 +37,17 @@ namespace logsplit
 
         public List<Counter> RefererList { get; set; } = new List<Counter>();
 
+        public List<Counter> RequestList { get; set; } = new List<Counter>();
+
         public Dictionary<int, long> StatusCodes { get; set; } = new Dictionary<int, long>();
 
         public Dictionary<string, long> Methods { get; set; } = new Dictionary<string, long>();
 
-        [JsonConverter(typeof(EnumLongDictionaryConverter))]
+        [JsonConverter(typeof(EnumLongDictionaryConverter<AddressFamily>))]
         public Dictionary<AddressFamily, long> Families { get; set; } = new Dictionary<AddressFamily, long>();
+
+        [JsonConverter(typeof(EnumLongDictionaryConverter<HttpVersion>))]
+        public Dictionary<HttpVersion, long> Protocols { get; set; } = new Dictionary<HttpVersion, long>();
 
         public List<string> InvalidLines { get; set; } = new List<string>();
 
@@ -54,9 +62,36 @@ namespace logsplit
                 var method = match.Groups[info.RequestMethodName].Value;
                 var referer = match.Groups[info.RefererName].Value;
 
+                // request
+                var request = match.Groups[info.RequestUriName].Value;
+
+                if (string.IsNullOrWhiteSpace(request))
+                {
+                    request = "";
+                }
+                else if(request.Contains("?"))
+                {
+                    request = request.Substring(0, request.IndexOf("?"));
+                }
+
+                // http version
+                HttpVersion httpVersion = HttpVersion.INVALID;
+                var protocol = match.Groups[info.ProtocolName].Value;
+
+                if (protocol == "HTTP/0.9") httpVersion = HttpVersion.HTTP09;
+                else if (protocol == "HTTP/1.0") httpVersion = HttpVersion.HTTP10;
+                else if (protocol == "HTTP/1.1") httpVersion = HttpVersion.HTTP11;
+                else if (protocol == "HTTP/2.0") httpVersion = HttpVersion.HTTP20;
+                else if (protocol == "HTTP/3.0") httpVersion = HttpVersion.HTTP30;
+
+                // referer sets
                 if (string.IsNullOrWhiteSpace(referer) || referer == "-")
                 {
                     referer = "SET_EMPTY";
+                }
+                else if (referer.EndsWith("/device-map/ssinfo.asp"))
+                {
+                    referer = "SET_DEVICEMAP_SSINFO";
                 }
                 else
                 {
@@ -65,7 +100,11 @@ namespace logsplit
                         var refererUri = new Uri(referer);
                         var host = refererUri.Host;
 
-                        if (refererUri.HostNameType == UriHostNameType.IPv4)
+                        if (info.SelfHosts.Contains(host))
+                        {
+                            referer = "SET_SELF";
+                        }
+                        else if (refererUri.HostNameType == UriHostNameType.IPv4)
                         {
                             var parts = host.Split('.').Select(p => int.Parse(p)).ToArray();
 
@@ -110,7 +149,9 @@ namespace logsplit
                 this.StatusCodes.EnsureField(status, () => 0, dict => dict[status]++);
                 this.Methods.EnsureField(method, () => 0, dict => dict[method]++);
                 this.Families.EnsureField(family, () => 0, dict => dict[family]++);
+                this.Protocols.EnsureField(httpVersion, () => 0, dict => dict[httpVersion]++);
                 this.Referer.EnsureField(referer, () => 0, dict => dict[referer]++);
+                this.Requests.EnsureField(request, () => 0, dict => dict[request]++);
             }
             else
             {
@@ -127,6 +168,11 @@ namespace logsplit
             this.VisitorHitMax = this.Visitors.Values.Max();
 
             this.RefererList = this.Referer
+                .Select(kv => new Counter() { Value = kv.Key, Count = kv.Value })
+                .OrderBy(kv => kv.Value)
+                .ToList();
+
+            this.RequestList = this.Requests
                 .Select(kv => new Counter() { Value = kv.Key, Count = kv.Value })
                 .OrderBy(kv => kv.Value)
                 .ToList();
