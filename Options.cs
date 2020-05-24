@@ -27,6 +27,9 @@ namespace logsplit
         [Option('d', "directory", HelpText = "Path to the new repository")]
         public string Path { get; set; } = Directory.GetCurrentDirectory();
 
+        [Option('p', "file-pattern", Required = false, HelpText = "Regular Expression to match files")]
+        public string FilePattern { get; set; } = null;
+
         [Option("force", Default = false, HelpText = "Enforce (re)analyze all files")]
         public bool Force { get; set; }
     }
@@ -37,7 +40,7 @@ namespace logsplit
         [Option('d', "directory", HelpText = "Path to the new repository")]
         public string Path { get; set; } = Directory.GetCurrentDirectory();
 
-        [Option('f', "file-pattern", Required = true, HelpText = "Regular Expression to match files")]
+        [Option('p', "file-pattern", Required = true, HelpText = "Regular Expression to match files")]
         public string FilePattern { get; set; }
     }
 

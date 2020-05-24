@@ -40,6 +40,16 @@ namespace logsplit
                 this.Month == month;
         }
 
+        public bool Equals(StreamInfo<TStreamWriter> info)
+        {
+            return this.Equals(info.HostName, info.LogGroup, info.Year, info.Month);
+        }
+
+        public bool Equals(LogInfo info)
+        {
+            return this.Equals(info.CollectionHostName, info.CollectionGroupName, info.CollectionYear, info.CollectionMonth);
+        }
+
         public override bool Equals(object obj)
         {
             if (obj != null && obj is StreamInfo<TStreamWriter> otherInfo)

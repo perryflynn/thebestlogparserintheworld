@@ -2,11 +2,8 @@
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Linq;
-using System.IO.Compression;
 using System.Collections.Generic;
-using System.Text;
 using System.Globalization;
-using System.Threading.Tasks;
 using logsplit.Extensions;
 using PerrysNetConsole;
 using Newtonsoft.Json;
@@ -16,8 +13,6 @@ namespace logsplit
 {
     public class Program
     {
-        private static List<StreamInfo<StreamWriter>> OutputStreams = new List<StreamInfo<StreamWriter>>();
-
         public static int Main(string[] args)
         {
             CoEx.ColorTitlePrimary = new ColorScheme(ConsoleColor.Gray, ConsoleColor.Black);
@@ -99,7 +94,9 @@ namespace logsplit
             CoEx.Clear();
             CoEx.WriteTitleLarge("Split Log Files into monthly collections");
 
+            var startTime = DateTime.Now;
             var inputPath = Path.Combine(opts.Path, "input");
+            var outputPath = Path.Combine(opts.Path, "repository");
 
             // Find valid log files
             var logFiles = Directory
@@ -108,77 +105,92 @@ namespace logsplit
                 .OrderBy(file => file)
                 .ToArray();
 
-            foreach(var logFile in logFiles)
+            // Abort import when there are dangling *.new files
+            var danglingFiles = Directory
+                .EnumerateFiles(outputPath, "*.*", SearchOption.AllDirectories)
+                .Where(file => file.EndsWith(".gz.new", true, CultureInfo.InvariantCulture));
+
+            if (logFiles.Any() && danglingFiles.Any())
             {
-                CoEx.WriteLine($"[{Array.IndexOf(logFiles, logFile)+1}/{logFiles.Length}] {Path.GetFileName(logFile)}\n");
+                CoEx.WriteLine($"The output directory '{outputPath}' contains " +
+                    "unfinished *.new files. Please rename or delete them.");
 
-                // log metadata
-                var loginfoFile = Path.Combine(Path.GetDirectoryName(logFile), "loginfo.json");
-                var logInfo = JsonConvert.DeserializeObject<LogInfo>(File.ReadAllText(loginfoFile));
-
-                var fileInfoMatch = logInfo.FilenameRegex.Match(logFile);
-
-                // init progress counters
-                var progress = new Progress();
-                progress.Start();
-
-                long current = 0;
-                long max = GetRealSize(logFile);
-
-                // get meta names
-                var logGroup = fileInfoMatch.Groups["GroupName"].Value;
-                var hostName = fileInfoMatch.Groups["HostName"].Value;
-
-                using(var stream = OpenFile(logFile))
-                {
-                    // process lines
-                    foreach(string line in ReadToEnd(stream))
-                    {
-                        // extract date from line
-                        var lineParts = line.Split(new char[] { '[', ']' });
-
-                        if(Timeslot.TryParseTimestamp(logInfo, lineParts[1], out DateTime date))
-                        {
-                            logInfo.CollectionGroupName = logGroup;
-                            logInfo.CollectionHostName = hostName;
-                            logInfo.CollectionYear = date.Year;
-                            logInfo.CollectionMonth = date.Month;
-
-                            // push line into correct output stream
-                            GetOutputStream(logInfo).StreamWriter.WriteLine(line);
-                        }
-
-                        // update progress
-                        current += line.Length;
-                        progress.Update(current, max);
-                    }
-                }
-
-                // flush output stream and delete source file
-                Flush().Wait();
-                File.Delete(logFile);
-
-                // reset for next file
-                progress.Dispose();
-                CoEx.Seek(0, -2, true);
+                return 1;
             }
 
-            // finalize output streams
-            OutputStreams.ForEach(s =>
+            // Perform import
+            using(var writers = new WriterCollection(outputPath))
             {
-                s.Dispose();
-
-                // remove the ".new" prefix from output filename
-                File.Move(s.TemporaryFullFileNameGz, s.FullFileNameGz, true);
-
-                // delete analyzer result if the log collection was changed
-                if (File.Exists($"{s.FullFileNameGz}.json"))
+                foreach(var logFile in logFiles)
                 {
-                    File.Delete($"{s.FullFileNameGz}.json");
-                }
-            });
+                    CoEx.WriteLine($"[{Array.IndexOf(logFiles, logFile)+1}/{logFiles.Length}] {Path.GetFileName(logFile)}\n");
 
-            OutputStreams.Clear();
+                    // log metadata
+                    var loginfoFile = Path.Combine(Path.GetDirectoryName(logFile), "loginfo.json");
+                    var logInfo = JsonConvert.DeserializeObject<LogInfo>(File.ReadAllText(loginfoFile));
+
+                    var fileInfoMatch = logInfo.FilenameRegex.Match(logFile);
+
+                    // init progress counters
+                    var progress = new Progress();
+                    progress.Start();
+
+                    long current = 0;
+                    long max = logFile.GetRealSize();
+
+                    // get meta names
+                    var logGroup = fileInfoMatch.Groups["GroupName"].Value;
+                    var hostName = fileInfoMatch.Groups["HostName"].Value;
+
+                    using(var stream = logFile.OpenFile())
+                    {
+                        // process lines
+                        foreach(string line in stream.ReadLineToEnd())
+                        {
+                            // extract date from line
+                            var lineParts = line.Split(new char[] { '[', ']' });
+
+                            if(Timeslot.TryParseTimestamp(logInfo, lineParts[1], out DateTime date))
+                            {
+                                logInfo.CollectionGroupName = logGroup;
+                                logInfo.CollectionHostName = hostName;
+                                logInfo.CollectionYear = date.Year;
+                                logInfo.CollectionMonth = date.Month;
+
+                                // push line into correct output stream
+                                progress.IsWaiting = true;
+                                var writer = writers.GetOutputStream(logInfo).StreamWriter;
+                                progress.IsWaiting = false;
+
+                                writer.WriteLine(line);
+                            }
+
+                            // update progress
+                            current += line.Length;
+                            progress.Update(current, max);
+                        }
+                    }
+
+                    // flush output stream and delete source file
+                    writers.Flush();
+
+                    // reset for next file
+                    progress.Dispose();
+                    CoEx.Seek(0, -2, true);
+                }
+            }
+
+            // delete imported files
+            foreach(var logFile in logFiles)
+            {
+                if (File.Exists(logFile))
+                {
+                    File.Delete(logFile);
+                }
+            }
+
+            CoEx.WriteLine();
+            CoEx.WriteLine($"Took {(DateTime.Now - startTime).TotalSeconds:0.000} seconds");
 
             return 0;
         }
@@ -192,17 +204,23 @@ namespace logsplit
             CoEx.Clear();
             CoEx.WriteTitleLarge("Analyze Log Files");
 
+            var startTime = DateTime.Now;
             var repoPath = Path.Combine(opts.Path, "repository");
+
+            Regex filePattern = null;
+            if (!string.IsNullOrWhiteSpace(opts.FilePattern))
+            {
+                filePattern = new Regex(opts.FilePattern, RegexOptions.Compiled);
+            }
 
             // find unprocessed log collections
             var logFiles = Directory
                 .EnumerateFiles(repoPath, "*.*", SearchOption.AllDirectories)
                 .Where(file => file.EndsWith(".log.gz", true, CultureInfo.InvariantCulture))
+                .Where(file => filePattern == null || filePattern.IsMatch(file))
                 .Where(file => opts.Force || !File.Exists($"{file}.json"))
                 .OrderBy(file => file)
                 .ToArray();
-
-            var startTime = DateTime.Now;
 
             foreach(var file in logFiles)
             {
@@ -218,11 +236,11 @@ namespace logsplit
 
                 // init progress counters
                 long current = 0;
-                long max = GetRealSize(file);
+                long max = file.GetRealSize();
 
                 // parse lines
-                using(var stream = OpenFile(file))
-                foreach(var line in ReadToEnd(stream))
+                using(var stream = file.OpenFile())
+                foreach(var line in stream.ReadLineToEnd())
                 {
                     // match one line against our regex
                     var match = logInfo.LineRegex.Match(line);
@@ -250,7 +268,13 @@ namespace logsplit
                 }
 
                 // save result as json
-                File.WriteAllText($"{file}.json", JsonConvert.SerializeObject(counter));
+                if (File.Exists($"{file}.json"))
+                {
+                    File.Delete($"{file}.json");
+                }
+
+                var counterJson = JsonConvert.SerializeObject(counter, Formatting.Indented);
+                File.WriteAllText($"{file}.json", counterJson);
 
                 // reset for next file
                 progress.Dispose();
@@ -258,7 +282,7 @@ namespace logsplit
             }
 
             CoEx.WriteLine();
-            Console.WriteLine($"Took {(DateTime.Now - startTime).TotalSeconds:0.000} seconds");
+            CoEx.WriteLine($"Took {(DateTime.Now - startTime).TotalSeconds:0.000} seconds");
 
             return 0;
         }
@@ -331,142 +355,38 @@ namespace logsplit
             load.Stop();
             graph.Draw(hitGraphData);
 
+            CoEx.WriteLine();
+            CoEx.WriteTitle("Referers");
+            CoEx.WriteLine();
+
+            var refererList = counter
+                .SelectMany(c => c.Value.RefererList)
+                .GroupBy(c => c.Value)
+                .Select(c => new { Name = c.Key, Count = c.Sum(v => v.Count) })
+                .OrderByDescending(c => c.Count)
+                .ThenBy(c => c.Name)
+                .Select(c => new string[] { c.Count.ToString("0,000"), c.Name })
+                .Take(50)
+                .ToArray();
+
+            CoEx.WriteTable(RowCollection.Create(refererList));
+
+            CoEx.WriteLine();
+            CoEx.WriteTitle("Requests");
+            CoEx.WriteLine();
+
+            var requestsList = counter
+                .SelectMany(c => c.Value.RequestList)
+                .GroupBy(c => c.Value)
+                .Select(c => new { Name = c.Key, Count = c.Sum(v => v.Count) })
+                .OrderByDescending(c => c.Count)
+                .Select(c => new string[] { c.Count.ToString("0,000"), c.Name })
+                .Take(50)
+                .ToArray();
+
+            CoEx.WriteTable(RowCollection.Create(requestsList));
+
             return 0;
-        }
-
-        /// <summary>
-        /// Open a standard or compressed stream depending on the file extension
-        /// </summary>
-        /// <param name="filePath"></param>
-        /// <returns></returns>
-        private static Stream OpenFile(string filePath)
-        {
-            if (File.Exists(filePath))
-            {
-                var fileStream = File.OpenRead(filePath);
-
-                if (filePath.EndsWith(".gz", true, CultureInfo.InvariantCulture))
-                {
-                    return new GZipStream(fileStream, CompressionMode.Decompress, false);
-                }
-
-                return fileStream;
-            }
-
-            throw new Exception("File does not exists");
-        }
-
-        /// <summary>
-        /// Get real size of a gzipped file
-        /// </summary>
-        /// <param name="file">The file</param>
-        /// <returns>Real size in bytes</returns>
-        private static long GetRealSize(string file)
-        {
-            if (file.EndsWith(".gz", true, CultureInfo.InvariantCulture))
-            {
-                // get real size from a gzipped file
-                using(var fs = File.OpenRead(file))
-                {
-                    fs.Position = fs.Length - 4;
-                    var b = new byte[4];
-                    fs.Read(b, 0, 4);
-                    return BitConverter.ToUInt32(b, 0);
-                }
-            }
-            else
-            {
-                // get size of a normal file
-                return (new FileInfo(file)).Length;
-            }
-        }
-
-        /// <summary>
-        /// Read a stream line by line to the end
-        /// </summary>
-        /// <param name="stream">The stream</param>
-        /// <returns>Enumerator for loops etc</returns>
-        private static IEnumerable<string> ReadToEnd(Stream stream)
-        {
-            using(var reader = new StreamReader(stream, Encoding.UTF8, false, -1, false))
-            {
-                while(reader.Peek() >= 0)
-                {
-                    yield return reader.ReadLine();
-                }
-            }
-        }
-
-        /// <summary>
-        /// Create output streams depending on the metadata
-        /// </summary>
-        /// <param name="hostName">Hostname of the log</param>
-        /// <param name="logGroup">Group/vHost of the log</param>
-        /// <param name="year">Year</param>
-        /// <param name="month">Month</param>
-        /// <returns>GZip Stream Writer</returns>
-        private static StreamInfo<StreamWriter> GetOutputStream(LogInfo info)
-        {
-            var existing = OutputStreams.SingleOrDefault(s => s.Equals(info.CollectionHostName, info.CollectionGroupName, info.CollectionYear, info.CollectionMonth));
-
-            if (existing == null)
-            {
-                // stream not existing in our list, so create one
-                existing = new StreamInfo<StreamWriter>()
-                {
-                    Path = outputLogPath,
-                    HostName = info.CollectionHostName,
-                    LogGroup = info.CollectionGroupName,
-                    Year = info.CollectionYear,
-                    Month = info.CollectionMonth
-                };
-
-                // save loginfo
-                if (!File.Exists($"{existing.FullFileNameGz}.loginfo.json"))
-                {
-                    var jsonFile = $"{existing.FullFileNameGz}.loginfo.json";
-                    var json = JsonConvert.SerializeObject(info, Formatting.Indented);
-                    File.WriteAllText(jsonFile, json);
-                }
-
-                // File Streams
-                var fileStream = File.OpenWrite(existing.TemporaryFullFileNameGz);
-                var gzipFileStream = new GZipStream(fileStream, CompressionMode.Compress, false);
-
-                // Writer
-                existing.StreamWriter = new StreamWriter(gzipFileStream, Encoding.UTF8);
-
-                // copy existing data into new gz file
-                if (File.Exists(existing.FullFileNameGz))
-                {
-                    using(var oldFileStream = File.OpenRead(existing.FullFileNameGz))
-                    using(var oldGzStream = new GZipStream(oldFileStream, CompressionMode.Decompress, false))
-                    {
-                        foreach (var line in ReadToEnd(oldGzStream))
-                        {
-                            existing.StreamWriter.WriteLine(line);
-                        }
-                    }
-
-                    // Flush existing data into new file
-                    existing.StreamWriter.Flush();
-                }
-
-                // Add stream to our list
-                OutputStreams.Add(existing);
-            }
-
-            return existing;
-        }
-
-        /// <summary>
-        /// Flush all output streams
-        /// </summary>
-        /// <returns>Async Task to wait for</returns>
-        private static Task Flush()
-        {
-            var allTasks = OutputStreams.Select(s => s.StreamWriter.FlushAsync()).ToArray();
-            return Task.WhenAll(allTasks);
         }
     }
 }
