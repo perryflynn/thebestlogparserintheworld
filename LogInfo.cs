@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 
@@ -76,5 +77,7 @@ namespace logsplit
         public string RefererName { set; get; } = "Referer";
 
         public string UserAgentName { set; get; } = "UserAgent";
+
+        public List<string> SelfHosts { get; set; } = new List<string>();
     }
 }

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.RegularExpressions;
 
 namespace logsplit
@@ -19,5 +20,6 @@ namespace logsplit
          string BytesSentName { get; }
          string RefererName { get; }
          string UserAgentName { get; }
+         List<string> SelfHosts { get; }
     }
 }
