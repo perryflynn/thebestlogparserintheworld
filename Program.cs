@@ -204,7 +204,14 @@ namespace logsplit
             CoEx.Clear();
             CoEx.WriteTitleLarge("Analyze Log Files");
 
+            // stats
             var startTime = DateTime.Now;
+            ulong cFiles = 0;
+            ulong cLines = 0;
+            ulong cLinesValid = 0;
+            ulong cLinesInvalid = 0;
+
+            // source
             var repoPath = Path.Combine(opts.Path, "repository");
 
             Regex filePattern = null;
@@ -259,12 +266,28 @@ namespace logsplit
                                 () => new Timeslot() { Time = ts.Date },
                                 dict => dict[ts.Date].ParseHit(logInfo, match, line)
                             );
+
+                            // stats
+                            cLinesValid++;
                         }
+                        else
+                        {
+                            // stats
+                            cLinesInvalid++;
+                        }
+                    }
+                    else
+                    {
+                        // stats
+                        cLinesInvalid++;
                     }
 
                     // update counters
                     current += line.Length;
                     progress.Update(current, max);
+
+                    // stats
+                    cLines++;
                 }
 
                 // save result as json
@@ -279,10 +302,21 @@ namespace logsplit
                 // reset for next file
                 progress.Dispose();
                 CoEx.Seek(0, -2, true);
+
+                // file stats
+                cFiles++;
             }
 
             CoEx.WriteLine();
-            CoEx.WriteLine($"Took {(DateTime.Now - startTime).TotalSeconds:0.000} seconds");
+
+            var totalSeconds = (DateTime.Now - startTime).TotalSeconds;
+
+            CoEx.WriteLine($"Took {totalSeconds:#,##0.###} seconds ({(totalSeconds/60):#,##0.###} minutes)");
+            CoEx.WriteLine($"Processed {cFiles:#,##0} files");
+            CoEx.WriteLine($"Processed {cLines:#,##0} lines");
+            CoEx.WriteLine($"Processed {cLinesValid:#,##0} valid lines");
+            CoEx.WriteLine($"Processed {cLinesInvalid:#,##0} invalid lines");
+            CoEx.WriteLine($"Processed {(cLines / totalSeconds):#,##0.###} lines per second");
 
             return 0;
         }
