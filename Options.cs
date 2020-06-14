@@ -32,6 +32,9 @@ namespace logsplit
 
         [Option("force", Default = false, HelpText = "Enforce (re)analyze all files")]
         public bool Force { get; set; }
+
+        [Option('c', "cpu", Default = 1, Min = 1, HelpText = "Set concurrency level")]
+        public int Cpus { get; set; }
     }
 
     [Verb("statistic", HelpText = "Generate statistics from the repository")]

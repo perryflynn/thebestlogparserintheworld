@@ -8,6 +8,8 @@ using logsplit.Extensions;
 using PerrysNetConsole;
 using Newtonsoft.Json;
 using CommandLine;
+using System.Threading.Tasks;
+using System.Threading;
 
 namespace logsplit
 {
@@ -204,13 +206,6 @@ namespace logsplit
             CoEx.Clear();
             CoEx.WriteTitleLarge("Analyze Log Files");
 
-            // stats
-            var startTime = DateTime.Now;
-            ulong cFiles = 0;
-            ulong cLines = 0;
-            ulong cLinesValid = 0;
-            ulong cLinesInvalid = 0;
-
             // source
             var repoPath = Path.Combine(opts.Path, "repository");
 
@@ -229,94 +224,63 @@ namespace logsplit
                 .OrderBy(file => file)
                 .ToArray();
 
+            // Initialize pool
+            var threadPool = new TaskPool<TaskAnalyzerProgress, bool>(opts.Cpus);
+
             foreach(var file in logFiles)
             {
-                Dictionary<DateTime, Timeslot> counter = new Dictionary<DateTime, Timeslot>();
-
-                CoEx.WriteLine($"[{Array.IndexOf(logFiles, file)+1}/{logFiles.Length}] {Path.GetFileName(file)}\n");
-
-                var progress = new Progress();
-                progress.Start();
-
-                // load loginfo
                 var logInfo = JsonConvert.DeserializeObject<LogInfo>(File.ReadAllText($"{file}.loginfo.json"));
+                var task = new AnalyzerTask(logInfo, file);
 
-                // init progress counters
-                long current = 0;
-                long max = file.GetRealSize();
-
-                // parse lines
-                using(var stream = file.OpenFile())
-                foreach(var line in stream.ReadLineToEnd())
-                {
-                    // match one line against our regex
-                    var match = logInfo.LineRegex.Match(line);
-
-                    if (match.Groups[logInfo.TimestampName].Success)
-                    {
-                        // get timestamp
-                        var tsstr = match.Groups[logInfo.TimestampName].Value;
-                        var tsOk = Timeslot.TryParseTimestamp(logInfo, tsstr, out DateTime ts);
-
-                        if (tsOk)
-                        {
-                            // analyze
-                            counter.EnsureField(
-                                ts.Date,
-                                () => new Timeslot() { Time = ts.Date },
-                                dict => dict[ts.Date].ParseHit(logInfo, match, line)
-                            );
-
-                            // stats
-                            cLinesValid++;
-                        }
-                        else
-                        {
-                            // stats
-                            cLinesInvalid++;
-                        }
-                    }
-                    else
-                    {
-                        // stats
-                        cLinesInvalid++;
-                    }
-
-                    // update counters
-                    current += line.Length;
-                    progress.Update(current, max);
-
-                    // stats
-                    cLines++;
-                }
-
-                // save result as json
-                if (File.Exists($"{file}.json"))
-                {
-                    File.Delete($"{file}.json");
-                }
-
-                var counterJson = JsonConvert.SerializeObject(counter, Formatting.Indented);
-                File.WriteAllText($"{file}.json", counterJson);
-
-                // reset for next file
-                progress.Dispose();
-                CoEx.Seek(0, -2, true);
-
-                // file stats
-                cFiles++;
+                threadPool.Add(task);
             }
 
+            // Initialize thread statistics
+            var state = new Dictionary<string, TaskAnalyzerProgress>();
+
+            var stateCancel = new CancellationTokenSource();
+            var stateTask = Task.Run(() =>
+            {
+                while(stateCancel.IsCancellationRequested == false)
+                {
+                    CoEx.Clear();
+
+                    foreach(var stateItem in state.Values.ToList())
+                    {
+
+                        CoEx.WriteLine($"[{stateItem.Status}] {Path.GetFileName(stateItem.Name)} {stateItem.LineCount:#,##0} lines, {stateItem.CurrentOffsetBytes:###,##0} byte / {stateItem.FileSizeBytes:###,##0} byte");
+                    }
+
+                    Thread.Sleep(500);
+                }
+            }, stateCancel.Token);
+
+            // Execute threads
+            threadPool.Execute(update =>
+            {
+                // store thread stats
+                state.EnsureField(
+                    update.Name,
+                    () => update,
+                    dict => dict[update.Name] = update);
+            })
+            .Count();
+
+            // cancel stats thread
+            stateCancel.Cancel();
+
+            // print summary
             CoEx.WriteLine();
 
-            var totalSeconds = (DateTime.Now - startTime).TotalSeconds;
+            var startTime = state.Min(v => v.Value.StartTime.Value);
+            var endTime = state.Max(v => v.Value.EndTime.Value);
+            var totalSeconds = (endTime - startTime).TotalSeconds;
+            var totalLines = state.Sum(v => v.Value.LineCount);
 
             CoEx.WriteLine($"Took {totalSeconds:#,##0.###} seconds ({(totalSeconds/60):#,##0.###} minutes)");
-            CoEx.WriteLine($"Processed {cFiles:#,##0} files");
-            CoEx.WriteLine($"Processed {cLines:#,##0} lines");
-            CoEx.WriteLine($"Processed {cLinesValid:#,##0} valid lines");
-            CoEx.WriteLine($"Processed {cLinesInvalid:#,##0} invalid lines");
-            CoEx.WriteLine($"Processed {(cLines / totalSeconds):#,##0.###} lines per second");
+            CoEx.WriteLine($"Processed {state.Count:#,##0} files");
+            CoEx.WriteLine($"Processed {totalLines:#,##0} lines");
+            CoEx.WriteLine($"Processed {(totalLines / totalSeconds):#,##0.###} lines per second");
 
             return 0;
         }
