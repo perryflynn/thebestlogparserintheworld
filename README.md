@@ -2,6 +2,26 @@
 
 A access log parser to create basic statistics from huge log files.
 
+## Analyze Benchmark
+
+4 Cores, 16 GB RAM:
+
+```md
+## Single Thread
+
+Took 4,810.503 seconds (80.167 minutes)
+Processed 14 files
+Processed 445,052,807 lines
+Processed 92,516.897 lines per second
+
+## 3 Threads
+
+Took 2,439.198 seconds (40.653 minutes)
+Processed 32 files
+Processed 445,289,011 lines
+Processed 182,555.498 lines per second
+```
+
 ## Run
 
 This tool is developed with .NET Core.
