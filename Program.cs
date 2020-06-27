@@ -8,8 +8,7 @@ using logsplit.Extensions;
 using PerrysNetConsole;
 using Newtonsoft.Json;
 using CommandLine;
-using System.Threading.Tasks;
-using System.Threading;
+using logsplit.Tasks;
 
 namespace logsplit
 {
@@ -205,6 +204,7 @@ namespace logsplit
         {
             CoEx.Clear();
             CoEx.WriteTitleLarge("Analyze Log Files");
+            CoEx.WriteLine();
 
             // source
             var repoPath = Path.Combine(opts.Path, "repository");
@@ -225,7 +225,13 @@ namespace logsplit
                 .ToArray();
 
             // Initialize pool
-            var threadPool = new TaskPool<TaskAnalyzerProgress, bool>(opts.Cpus);
+            var numThreads = opts.Cpus;
+            if (numThreads < 1)
+            {
+                numThreads = 1;
+            }
+
+            var threadPool = new TaskPool<TaskAnalyzerProgress, bool>(numThreads);
 
             foreach(var file in logFiles)
             {
@@ -236,49 +242,30 @@ namespace logsplit
             }
 
             // Initialize thread statistics
-            var state = new Dictionary<string, TaskAnalyzerProgress>();
-
-            var stateCancel = new CancellationTokenSource();
-            var stateTask = Task.Run(() =>
-            {
-                while(stateCancel.IsCancellationRequested == false)
-                {
-                    CoEx.Clear();
-
-                    foreach(var stateItem in state.Values.ToList())
-                    {
-
-                        CoEx.WriteLine($"[{stateItem.Status}] {Path.GetFileName(stateItem.Name)} {stateItem.LineCount:#,##0} lines, {stateItem.CurrentOffsetBytes:###,##0} byte / {stateItem.FileSizeBytes:###,##0} byte");
-                    }
-
-                    Thread.Sleep(500);
-                }
-            }, stateCancel.Token);
+            var progress = new TaskPoolProgressInfo<TaskAnalyzerProgress>(numThreads, logFiles.Length);
 
             // Execute threads
+            progress.Start();
             threadPool.Execute(update =>
             {
                 // store thread stats
-                state.EnsureField(
-                    update.Name,
-                    () => update,
-                    dict => dict[update.Name] = update);
+                progress.Update(update);
             })
             .Count();
 
             // cancel stats thread
-            stateCancel.Cancel();
+            progress.Cancel();
 
             // print summary
             CoEx.WriteLine();
 
-            var startTime = state.Min(v => v.Value.StartTime.Value);
-            var endTime = state.Max(v => v.Value.EndTime.Value);
+            var startTime = progress.States.Min(v => v.Value.StartTime.Value);
+            var endTime = progress.States.Max(v => v.Value.EndTime.Value);
             var totalSeconds = (endTime - startTime).TotalSeconds;
-            var totalLines = state.Sum(v => v.Value.LineCount);
+            var totalLines = progress.States.Sum(v => v.Value.LineCount);
 
             CoEx.WriteLine($"Took {totalSeconds:#,##0.###} seconds ({(totalSeconds/60):#,##0.###} minutes)");
-            CoEx.WriteLine($"Processed {state.Count:#,##0} files");
+            CoEx.WriteLine($"Processed {progress.States.Count:#,##0} files");
             CoEx.WriteLine($"Processed {totalLines:#,##0} lines");
             CoEx.WriteLine($"Processed {(totalLines / totalSeconds):#,##0.###} lines per second");
 
@@ -335,7 +322,7 @@ namespace logsplit
             load.Start();
 
             var visitorsGraphData = counter
-                .GroupBy(c => $"{c.Key.Year:0000}-{c.Key.Month:00}")
+                .GroupBy(c => $"{c.Key.Year:0000}-{c.Key.GetIso8601WeekOfYear():00}")
                 .ToDictionary(c => c.Key, c => c.Sum(i => (double)i.Value.VisitorsCount));
 
             load.Stop();
@@ -347,7 +334,7 @@ namespace logsplit
             load.Start();
 
             var hitGraphData = counter
-                .GroupBy(c => $"{c.Key.Year:0000}-{c.Key.Month:00}")
+                .GroupBy(c => $"{c.Key.Year:0000}-{c.Key.GetIso8601WeekOfYear():00}")
                 .ToDictionary(c => c.Key, c => c.Sum(i => (double)i.Value.Hits));
 
             load.Stop();
@@ -364,25 +351,36 @@ namespace logsplit
                 .OrderByDescending(c => c.Count)
                 .ThenBy(c => c.Name)
                 .Select(c => new string[] { c.Count.ToString("0,000"), c.Name })
-                .Take(50)
+                .Take(100)
                 .ToArray();
 
             CoEx.WriteTable(RowCollection.Create(refererList));
 
-            CoEx.WriteLine();
-            CoEx.WriteTitle("Requests");
-            CoEx.WriteLine();
+            var reqsplit = new Regex(@"/(?:[^/]+\.html|[^/.]+)?$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+            var reqgroups = new Tuple<string, Func<string,bool>>[] {
+                new Tuple<string, Func<string,bool>>(@"'/(?:[^/]+\.html|[^/.]+)?$'", (string name) => reqsplit.IsMatch(name)),
+                new Tuple<string, Func<string,bool>>(@"NOT '/(?:[^/]+\.html|[^/.]+)?$'", (string name) => !reqsplit.IsMatch(name)),
+            };
 
-            var requestsList = counter
-                .SelectMany(c => c.Value.RequestList)
-                .GroupBy(c => c.Value)
-                .Select(c => new { Name = c.Key, Count = c.Sum(v => v.Count) })
-                .OrderByDescending(c => c.Count)
-                .Select(c => new string[] { c.Count.ToString("0,000"), c.Name })
-                .Take(50)
-                .ToArray();
+            foreach(var pattern in reqgroups)
+            {
+                CoEx.WriteLine();
+                CoEx.WriteTitle($"Requests equals {pattern.Item1}");
+                CoEx.WriteLine();
 
-            CoEx.WriteTable(RowCollection.Create(requestsList));
+                var requestsList = counter
+                    .SelectMany(c => c.Value.RequestList)
+                    .Where(c => ((int)(c.HttpStatus/100)) == 2)
+                    .GroupBy(c => $"{c.HttpStatus} {c.Method} {c.Url}")
+                    .Select(c => new { Url = c.First().Url, Method = c.First().Method, Status = c.First().HttpStatus, Count = c.Sum(v => v.Count) })
+                    .Where(c => pattern.Item2(c.Url))
+                    .OrderByDescending(c => c.Count)
+                    .Select(c => new string[] { c.Count.ToString("0,000"), c.Method, c.Status.ToString(), c.Url })
+                    .Take(100)
+                    .ToArray();
+
+                CoEx.WriteTable(RowCollection.Create(requestsList));
+            }
 
             return 0;
         }

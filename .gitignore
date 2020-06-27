@@ -1,4 +1,5 @@
 dist/
+publish/
 
 .vscode/*
 !.vscode/settings.json

@@ -1,6 +1,6 @@
 using System;
 
-namespace logsplit
+namespace logsplit.Tasks
 {
     public interface ITaskPoolTask<TProgress, TReturn>
     {

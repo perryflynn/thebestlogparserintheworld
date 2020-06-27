@@ -4,7 +4,7 @@ using System.IO;
 using logsplit.Extensions;
 using Newtonsoft.Json;
 
-namespace logsplit
+namespace logsplit.Tasks
 {
     public class AnalyzerTask : ITaskPoolTask<TaskAnalyzerProgress, bool>
     {

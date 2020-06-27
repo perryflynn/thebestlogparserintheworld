@@ -1,4 +1,4 @@
-namespace logsplit
+namespace logsplit.Tasks
 {
     public enum TaskStatus
     {

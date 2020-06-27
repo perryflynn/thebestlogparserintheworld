@@ -23,7 +23,7 @@ namespace logsplit
         public Dictionary<string, long> Referer { get; set; } = new Dictionary<string, long>();
 
         [JsonIgnore]
-        public Dictionary<string, long> Requests { get; set; } = new Dictionary<string, long>();
+        public Dictionary<RequestIdentifier, long> Requests { get; set; } = new Dictionary<RequestIdentifier, long>();
 
         public long VisitorsCount { get; set; }
 
@@ -37,7 +37,7 @@ namespace logsplit
 
         public List<Counter> RefererList { get; set; } = new List<Counter>();
 
-        public List<Counter> RequestList { get; set; } = new List<Counter>();
+        public List<RequestIdentifier> RequestList { get; set; } = new List<RequestIdentifier>();
 
         public Dictionary<int, long> StatusCodes { get; set; } = new Dictionary<int, long>();
 
@@ -142,6 +142,12 @@ namespace logsplit
                     }
                 }
 
+                var reqIdent = new RequestIdentifier() {
+                    HttpStatus = status,
+                    Method = method,
+                    Url = request
+                };
+
                 this.Hits++;
                 this.Bytes += bytes;
 
@@ -151,7 +157,7 @@ namespace logsplit
                 this.Families.EnsureField(family, () => 0, dict => dict[family]++);
                 this.Protocols.EnsureField(httpVersion, () => 0, dict => dict[httpVersion]++);
                 this.Referer.EnsureField(referer, () => 0, dict => dict[referer]++);
-                this.Requests.EnsureField(request, () => 0, dict => dict[request]++);
+                this.Requests.EnsureField(reqIdent, () => 0, dict => dict[reqIdent]++);
             }
             else
             {
@@ -173,8 +179,16 @@ namespace logsplit
                 .ToList();
 
             this.RequestList = this.Requests
-                .Select(kv => new Counter() { Value = kv.Key, Count = kv.Value })
-                .OrderBy(kv => kv.Value)
+                .Select(kv => new RequestIdentifier()
+                {
+                    Count = kv.Value,
+                    HttpStatus = kv.Key.HttpStatus,
+                    Method = kv.Key.Method,
+                    Url = kv.Key.Url
+                })
+                .OrderBy(kv => kv.Method)
+                .ThenBy(kv => kv.Url)
+                .ThenBy(kv => kv.HttpStatus)
                 .ToList();
         }
 
