@@ -3,8 +3,9 @@ using System.IO;
 
 namespace logsplit.Tasks
 {
-    public class TaskAnalyzerProgress : ITaskProgress
+    public class ReadFileProgress : ITaskProgress
     {
+        public string Category { get; set; }
         public string Name { get; set; }
         public TaskStatus Status { get; set; } = TaskStatus.NotStarted;
         public DateTime? StartTime { get; set; } = null;

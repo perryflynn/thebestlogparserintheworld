@@ -95,7 +95,6 @@ namespace logsplit
             CoEx.Clear();
             CoEx.WriteTitleLarge("Split Log Files into monthly collections");
 
-            var startTime = DateTime.Now;
             var inputPath = Path.Combine(opts.Path, "input");
             var outputPath = Path.Combine(opts.Path, "repository");
 
@@ -119,69 +118,48 @@ namespace logsplit
                 return 1;
             }
 
-            // Perform import
-            using(var writers = new WriterCollection(outputPath))
+            // Concurrency
+            var numThreads = opts.Cpus;
+            if (numThreads < 1)
             {
+                numThreads = 1;
+            }
+
+            // Initialize progress
+            var progress = new TaskPoolProgressInfo(numThreads, logFiles.Length * 2);
+
+            Action<ITaskProgress> progressUpdate = update =>
+            {
+                progress.Update(update);
+            };
+
+            // Perform import
+            using(var writers = new GZipWriterCollection<StreamInfo>(numThreads, logFiles.Length * 2, progressUpdate))
+            {
+                // Create import threads
+                var threadPool = new TaskPool<ReadFileProgress, bool>(numThreads);
+
                 foreach(var logFile in logFiles)
                 {
-                    CoEx.WriteLine($"[{Array.IndexOf(logFiles, logFile)+1}/{logFiles.Length}] {Path.GetFileName(logFile)}\n");
+                    var task = new ImportTask(outputPath, logFile, writers);
+                    threadPool.Add(task);
+                }
 
-                    // log metadata
-                    var loginfoFile = Path.Combine(Path.GetDirectoryName(logFile), "loginfo.json");
-                    var logInfo = JsonConvert.DeserializeObject<LogInfo>(File.ReadAllText(loginfoFile));
+                // Execute threads
+                progress.Start();
+                threadPool.Execute(progressUpdate).Count();
 
-                    var fileInfoMatch = logInfo.FilenameRegex.Match(logFile);
-
-                    // init progress counters
-                    var progress = new Progress();
-                    progress.Start();
-
-                    long current = 0;
-                    long max = logFile.GetRealSize();
-
-                    // get meta names
-                    var logGroup = fileInfoMatch.Groups["GroupName"].Value;
-                    var hostName = fileInfoMatch.Groups["HostName"].Value;
-
-                    using(var stream = logFile.OpenFile())
+                // delete json files
+                foreach(var writer in writers.Writers.Values)
+                {
+                    if (File.Exists($"{writer.FileName}.json"))
                     {
-                        // process lines
-                        foreach(string line in stream.ReadLineToEnd())
-                        {
-                            // extract date from line
-                            var lineParts = line.Split(new char[] { '[', ']' });
-
-                            if(Timeslot.TryParseTimestamp(logInfo, lineParts[1], out DateTime date))
-                            {
-                                logInfo.CollectionGroupName = logGroup;
-                                logInfo.CollectionHostName = hostName;
-                                logInfo.CollectionYear = date.Year;
-                                logInfo.CollectionMonth = date.Month;
-
-                                // push line into correct output stream
-                                progress.IsWaiting = true;
-                                var writer = writers.GetOutputStream(logInfo).StreamWriter;
-                                progress.IsWaiting = false;
-
-                                writer.WriteLine(line);
-                            }
-
-                            // update progress
-                            current += line.Length;
-                            progress.Update(current, max);
-                        }
+                        File.Delete($"{writer.FileName}.json");
                     }
-
-                    // flush output stream and delete source file
-                    writers.Flush();
-
-                    // reset for next file
-                    progress.Dispose();
-                    CoEx.Seek(0, -2, true);
                 }
             }
 
-            // delete imported files
+            // delete source files
             foreach(var logFile in logFiles)
             {
                 if (File.Exists(logFile))
@@ -190,8 +168,30 @@ namespace logsplit
                 }
             }
 
-            CoEx.WriteLine();
-            CoEx.WriteLine($"Took {(DateTime.Now - startTime).TotalSeconds:0.000} seconds");
+            // Result
+            progress.Cancel();
+            var progressResults = progress.States.Values
+                .Where(p => p is ReadFileProgress)
+                .Cast<ReadFileProgress>()
+                .ToList();
+
+            if (progressResults.Count > 0)
+            {
+                var startTime = progressResults.Min(s => s.StartTime);
+                var endTime = progressResults.Max(s => s.EndTime);
+                var totalSeconds = ((endTime - startTime)?.TotalSeconds ?? 0);
+                var totalLines = progressResults.Sum(s => s.LineCount);
+
+                CoEx.WriteLine();
+                CoEx.WriteLine($"Took {totalSeconds:0.000} seconds");
+                CoEx.WriteLine($"Processed {progressResults.Count:#,##0} files");
+                CoEx.WriteLine($"Processed {totalLines:#,##0} lines");
+
+                if (totalSeconds > 0)
+                {
+                    CoEx.WriteLine($"Processed {(totalLines / totalSeconds):#,##0.#} lines per second");
+                }
+            }
 
             return 0;
         }
@@ -231,7 +231,7 @@ namespace logsplit
                 numThreads = 1;
             }
 
-            var threadPool = new TaskPool<TaskAnalyzerProgress, bool>(numThreads);
+            var threadPool = new TaskPool<ReadFileProgress, bool>(numThreads);
 
             foreach(var file in logFiles)
             {
@@ -242,7 +242,7 @@ namespace logsplit
             }
 
             // Initialize thread statistics
-            var progress = new TaskPoolProgressInfo<TaskAnalyzerProgress>(numThreads, logFiles.Length);
+            var progress = new TaskPoolProgressInfo(numThreads, logFiles.Length);
 
             // Execute threads
             progress.Start();
@@ -259,15 +259,27 @@ namespace logsplit
             // print summary
             CoEx.WriteLine();
 
-            var startTime = progress.States.Min(v => v.Value.StartTime.Value);
-            var endTime = progress.States.Max(v => v.Value.EndTime.Value);
-            var totalSeconds = (endTime - startTime).TotalSeconds;
-            var totalLines = progress.States.Sum(v => v.Value.LineCount);
+            var progressResults = progress.States.Values
+                .Where(p => p is ReadFileProgress)
+                .Cast<ReadFileProgress>()
+                .ToList();
 
-            CoEx.WriteLine($"Took {totalSeconds:#,##0.###} seconds ({(totalSeconds/60):#,##0.###} minutes)");
-            CoEx.WriteLine($"Processed {progress.States.Count:#,##0} files");
-            CoEx.WriteLine($"Processed {totalLines:#,##0} lines");
-            CoEx.WriteLine($"Processed {(totalLines / totalSeconds):#,##0.###} lines per second");
+            if (progressResults.Count > 0)
+            {
+                var startTime = progressResults.Min(v => v.StartTime);
+                var endTime = progressResults.Max(v => v.EndTime);
+                var totalSeconds = (endTime - startTime)?.TotalSeconds ?? 0;
+                var totalLines = progressResults.Sum(v => v.LineCount);
+
+                CoEx.WriteLine($"Took {totalSeconds:#,##0.###} seconds ({(totalSeconds/60):#,##0.###} minutes)");
+                CoEx.WriteLine($"Processed {progress.States.Count:#,##0} files");
+                CoEx.WriteLine($"Processed {totalLines:#,##0} lines");
+
+                if (totalSeconds > 0)
+                {
+                    CoEx.WriteLine($"Processed {(totalLines / totalSeconds):#,##0.#} lines per second");
+                }
+            }
 
             return 0;
         }

@@ -19,6 +19,9 @@ namespace logsplit
     {
         [Option('d', "directory", HelpText = "Path to the new repository")]
         public string Path { get; set; } = Directory.GetCurrentDirectory();
+
+        [Option('c', "cpu", Default = 1, HelpText = "Set concurrency level")]
+        public int Cpus { get; set; }
     }
 
     [Verb("analyze", HelpText = "Analyze log files in repository")]

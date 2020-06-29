@@ -1,30 +1,36 @@
 using System;
-using System.IO;
+using logsplit.Tasks;
 
 namespace logsplit
 {
-    public class StreamInfo<TStreamWriter> : IDisposable
-        where TStreamWriter : StreamWriter
+    public class StreamInfo : IGZipWriterKey
     {
-        public string Path { get; set; }
+        public string Directory { get; set; }
         public string HostName { get; set; }
         public string LogGroup { get; set; }
         public int Year { get; set; } = DateTime.Now.Year;
         public int Month { get; set; } = DateTime.Now.Month;
-        public TStreamWriter StreamWriter { get; set; }
-        public int WriteCounter { get; set; } = 0;
 
-        public string FullFileName => System.IO.Path.Combine(this.Path, this.ToString());
+        public string FullFileName => System.IO.Path.Combine(this.Directory, this.ToString());
         public string FullFileNameGz => $"{this.FullFileName}.gz";
         public string TemporaryFullFileNameGz => $"{this.FullFileName}.gz.new";
 
-        public void Dispose()
+        public StreamInfo()
         {
-            if (this.StreamWriter != null)
-            {
-                this.StreamWriter.Dispose();
-                this.StreamWriter = null;
-            }
+        }
+
+        public StreamInfo(string directory, LogInfo logInfo)
+        {
+            this.Directory = directory;
+            this.HostName = logInfo.CollectionHostName;
+            this.LogGroup = logInfo.CollectionGroupName;
+            this.Year = logInfo.CollectionYear;
+            this.Month = logInfo.CollectionMonth;
+        }
+
+        public string GetGZipWriterFileName()
+        {
+            return this.FullFileNameGz;
         }
 
         public override string ToString()
@@ -40,7 +46,7 @@ namespace logsplit
                 this.Month == month;
         }
 
-        public bool Equals(StreamInfo<TStreamWriter> info)
+        public bool Equals(StreamInfo info)
         {
             return this.Equals(info.HostName, info.LogGroup, info.Year, info.Month);
         }
@@ -52,7 +58,7 @@ namespace logsplit
 
         public override bool Equals(object obj)
         {
-            if (obj != null && obj is StreamInfo<TStreamWriter> otherInfo)
+            if (obj != null && obj is StreamInfo otherInfo)
             {
                 return this.Equals(otherInfo.HostName, otherInfo.LogGroup, otherInfo.Year, otherInfo.Month);
             }

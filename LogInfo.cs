@@ -1,10 +1,11 @@
+using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 
 namespace logsplit
 {
-    public class LogInfo : ILogInfo
+    public class LogInfo : ILogInfo, ICloneable
     {
         [JsonIgnore]
         private string rgxstr = @"^(?<ClientIP>[^\s]+)\s+-\s+(?<ClientUser>[^\s]+)\s+\[(?<Timestamp>[^\]]+)\]\s+""(?:(?:(?<RequestMethod>[A-Z]+)\s+(?<RequestUri>[^\s]+)\s+(?<Protocol>[^""]+)|(?<InvalidRequest>.+)))?""\s+(?<StatusCode>[0-9]+)\s+(?<BytesSent>[0-9]+)\s+""(?<Referer>[^""]*)""\s+""(?<UserAgent>[^""]*)""$";
@@ -79,5 +80,30 @@ namespace logsplit
         public string UserAgentName { set; get; } = "UserAgent";
 
         public List<string> SelfHosts { get; set; } = new List<string>();
+
+        public object Clone()
+        {
+            return new LogInfo()
+            {
+                LineRegexStr = this.LineRegexStr,
+                FileRegexStr = this.FileRegexStr,
+                TimestampFormat = this.TimestampFormat,
+                CollectionHostName = this.CollectionHostName,
+                CollectionGroupName = this.CollectionGroupName,
+                CollectionYear = this.CollectionYear,
+                CollectionMonth = this.CollectionMonth,
+                ClientIpName = this.ClientIpName,
+                ClientUserName = this.ClientUserName,
+                TimestampName = this.TimestampName,
+                RequestMethodName = this.RequestMethodName,
+                RequestUriName = this.RequestUriName,
+                ProtocolName = this.ProtocolName,
+                InvalidRequestName = this.InvalidRequestName,
+                StatusCodeName = this.StatusCodeName,
+                BytesSentName = this.BytesSentName,
+                RefererName = this.RefererName,
+                UserAgentName = this.UserAgentName,
+            };
+        }
     }
 }

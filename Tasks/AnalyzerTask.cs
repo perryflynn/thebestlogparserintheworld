@@ -6,7 +6,7 @@ using Newtonsoft.Json;
 
 namespace logsplit.Tasks
 {
-    public class AnalyzerTask : ITaskPoolTask<TaskAnalyzerProgress, bool>
+    public class AnalyzerTask : ITaskPoolTask<ReadFileProgress, bool>
     {
         public LogInfo LogInfo { get; set; }
         public string LogFile { get; set; }
@@ -17,11 +17,12 @@ namespace logsplit.Tasks
             this.LogInfo = logInfo;
         }
 
-        public bool Execute(IProgress<TaskAnalyzerProgress> progressUpdater)
+        public bool Execute(IProgress<ReadFileProgress> progressUpdater)
         {
             // Init progress
-            var progress = new TaskAnalyzerProgress()
+            var progress = new ReadFileProgress()
             {
+                Category = "Analyze",
                 Name = this.LogFile,
                 StartTime = DateTime.Now,
             };

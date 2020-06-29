@@ -6,12 +6,11 @@ using PerrysNetConsole;
 
 namespace logsplit.Tasks
 {
-    public class TaskPoolProgressInfo<TProgress>
-        where TProgress : ITaskProgress
+    public class TaskPoolProgressInfo
     {
         public int ThreadCount { get; set; }
         public int TaskCount { get; set; }
-        public ConcurrentDictionary<string, TProgress> States { get; set; }
+        public ConcurrentDictionary<string, ITaskProgress> States { get; set; }
         public CancellationTokenSource CancelationToken { get; set; }
         public Task InfoTask { get; set; }
 
@@ -19,7 +18,7 @@ namespace logsplit.Tasks
         {
             this.ThreadCount = threadCount;
             this.TaskCount = taskCount;
-            this.States = new ConcurrentDictionary<string, TProgress>(this.ThreadCount * 2, this.TaskCount);
+            this.States = new ConcurrentDictionary<string, ITaskProgress>(this.ThreadCount * 2, this.TaskCount);
         }
 
         public void Start()
@@ -44,10 +43,17 @@ namespace logsplit.Tasks
                     }
 
                     linesPresent = 0;
-                    foreach(var stateItem in this.States.Values.OrderByDescending(v => v.Status).ThenBy(v => v.Name))
+                    foreach(var stateCategory in this.States.Values.OrderBy(v => v.Category).GroupBy(v => v.Category))
                     {
-                        CoEx.WriteLine(stateItem.ToString());
-                        linesPresent++;
+                        CoEx.WriteLine();
+                        CoEx.WriteTitle($" {stateCategory.Key} ");
+                        linesPresent += 2;
+
+                        foreach(var stateItem in stateCategory.OrderByDescending(v => v.Status).ThenBy(v => v.Name))
+                        {
+                            CoEx.WriteLine(stateItem.ToString());
+                            linesPresent++;
+                        }
                     }
 
                     Thread.Sleep(500);
@@ -60,7 +66,7 @@ namespace logsplit.Tasks
             this.CancelationToken.Cancel();
         }
 
-        public void Update(TProgress update)
+        public void Update(ITaskProgress update)
         {
             this.States.AddOrUpdate(update.Name, update, (key, value) => value);
         }

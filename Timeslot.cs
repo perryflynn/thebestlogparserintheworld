@@ -199,9 +199,23 @@ namespace logsplit
             return $"{begin}:{end}";
         }
 
-        public static bool TryParseTimestamp(ILogInfo info, string timestamp, out DateTime parsedTimestamp)
+        public static bool TryGetTimestamp(ILogInfo info, string line, out Match regexMatch, out DateTime parsedTimestamp)
         {
-            var fixedTs = timestamp;
+            parsedTimestamp = DateTime.MinValue;
+            regexMatch = info.LineRegex.Match(line);
+
+            if (regexMatch.Groups[info.TimestampName].Success)
+            {
+                var fixedTs = regexMatch.Groups[info.TimestampName].Value;
+                return TryParseTimestamp(info, fixedTs, out parsedTimestamp);
+            }
+
+            return false;
+        }
+
+        public static bool TryParseTimestamp(ILogInfo info, string timeStamp, out DateTime parsedTimestamp)
+        {
+            var fixedTs = timeStamp;
             if (info.TimestampFixOffsetColon)
             {
                 fixedTs = FixTimestampOffset(info, fixedTs);

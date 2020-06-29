@@ -2,9 +2,12 @@ namespace logsplit.Tasks
 {
     public interface ITaskProgress
     {
-         string Name { get; }
-         TaskStatus Status { get; }
+        string Category { get; }
 
-         string ToString();
+        string Name { get; }
+
+        TaskStatus Status { get; }
+
+        string ToString();
     }
 }
