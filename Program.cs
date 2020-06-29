@@ -98,6 +98,18 @@ namespace logsplit
             var inputPath = Path.Combine(opts.Path, "input");
             var outputPath = Path.Combine(opts.Path, "repository");
 
+            if (!Directory.Exists(inputPath))
+            {
+                CoEx.WriteLine($"Input path '{inputPath}' does not exists");
+                return 1;
+            }
+
+            if (!Directory.Exists(outputPath))
+            {
+                CoEx.WriteLine($"Output path '{outputPath}' does not exists");
+                return 1;
+            }
+
             // Find valid log files
             var logFiles = Directory
                 .EnumerateFiles(inputPath, "*.*", SearchOption.AllDirectories)
@@ -209,6 +221,12 @@ namespace logsplit
             // source
             var repoPath = Path.Combine(opts.Path, "repository");
 
+            if (!Directory.Exists(repoPath))
+            {
+                CoEx.WriteLine($"Repository path '{repoPath}' does not exists");
+                return 1;
+            }
+
             Regex filePattern = null;
             if (!string.IsNullOrWhiteSpace(opts.FilePattern))
             {
@@ -291,6 +309,12 @@ namespace logsplit
 
             var repoPath = Path.Combine(opts.Path, "repository");
             var rgx = new Regex(opts.FilePattern, RegexOptions.Compiled);
+
+            if (!Directory.Exists(repoPath))
+            {
+                CoEx.WriteLine($"Repository path '{repoPath}' does not exists");
+                return 1;
+            }
 
             // find unprocessed log collections
             var files = Directory

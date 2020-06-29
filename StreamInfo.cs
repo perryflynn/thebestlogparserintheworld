@@ -19,7 +19,7 @@ namespace logsplit
         {
         }
 
-        public StreamInfo(string directory, LogInfo logInfo)
+        public StreamInfo(string directory, ILogInfo logInfo)
         {
             this.Directory = directory;
             this.HostName = logInfo.CollectionHostName;
@@ -51,7 +51,7 @@ namespace logsplit
             return this.Equals(info.HostName, info.LogGroup, info.Year, info.Month);
         }
 
-        public bool Equals(LogInfo info)
+        public bool Equals(ILogInfo info)
         {
             return this.Equals(info.CollectionHostName, info.CollectionGroupName, info.CollectionYear, info.CollectionMonth);
         }

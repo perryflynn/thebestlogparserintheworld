@@ -8,10 +8,10 @@ namespace logsplit.Tasks
 {
     public class AnalyzerTask : ITaskPoolTask<ReadFileProgress, bool>
     {
-        public LogInfo LogInfo { get; set; }
+        public ILogInfo LogInfo { get; set; }
         public string LogFile { get; set; }
 
-        public AnalyzerTask(LogInfo logInfo, string logFile)
+        public AnalyzerTask(ILogInfo logInfo, string logFile)
         {
             this.LogFile = logFile;
             this.LogInfo = logInfo;

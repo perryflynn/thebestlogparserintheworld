@@ -21,5 +21,9 @@ namespace logsplit
          string RefererName { get; }
          string UserAgentName { get; }
          List<string> SelfHosts { get; }
+        string CollectionHostName { get; }
+        string CollectionGroupName { get; }
+        int CollectionYear { get; }
+        int CollectionMonth { get; }
     }
 }
