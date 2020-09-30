@@ -47,13 +47,19 @@ namespace logsplit.Extensions
         {
             if (file.EndsWith(".gz", true, CultureInfo.InvariantCulture))
             {
-                // get real size from a gzipped file
-                using(var fs = File.OpenRead(file))
+                try {
+                    // get real size from a gzipped file
+                    using(var fs = File.OpenRead(file))
+                    {
+                        fs.Position = fs.Length - 4;
+                        var b = new byte[4];
+                        fs.Read(b, 0, 4);
+                        return BitConverter.ToUInt32(b, 0);
+                    }
+                }
+                catch
                 {
-                    fs.Position = fs.Length - 4;
-                    var b = new byte[4];
-                    fs.Read(b, 0, 4);
-                    return BitConverter.ToUInt32(b, 0);
+                    return 0;
                 }
             }
             else
