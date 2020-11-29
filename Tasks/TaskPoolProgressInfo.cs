@@ -43,7 +43,15 @@ namespace logsplit.Tasks
                     }
 
                     linesPresent = 0;
-                    foreach(var stateCategory in this.States.Values.OrderBy(v => v.Category).GroupBy(v => v.Category))
+
+                    var finished = this.States.Values.Where(v => v.Status == TaskStatus.Finished);
+                    if (finished.Any())
+                    {
+                        CoEx.WriteLine($"{finished.Count()} tasks are already finished.");
+                        linesPresent++;
+                    }
+
+                    foreach(var stateCategory in this.States.Values.Where(v => v.Status != TaskStatus.Finished).OrderBy(v => v.Category).GroupBy(v => v.Category))
                     {
                         CoEx.WriteLine();
                         CoEx.WriteTitle($" {stateCategory.Key} ");

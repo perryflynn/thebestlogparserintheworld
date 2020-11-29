@@ -57,7 +57,7 @@ namespace logsplit.Extensions
                         return BitConverter.ToUInt32(b, 0);
                     }
                 }
-                catch
+                catch (Exception)
                 {
                     return 0;
                 }
